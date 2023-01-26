@@ -17,7 +17,7 @@ def md2html(input_filepath: str, output_dirpath: str, verbose: bool = False, for
     if not force and Path(output_filepath).exists():
         executable_filename = Path(__file__).name
         should_overwrite = input(f"{executable_filename}: overwrite '{output_filepath}'? ")
-        if should_overwrite is None or should_overwrite[0].lower() != "y": return
+        if len(should_overwrite) == 0 or should_overwrite[0].lower() != "y": return
 
     # apiをたたく
     with open(input_filepath, "r", encoding="utf-8") as f:
@@ -54,7 +54,7 @@ def main() -> None:
     if args.output is not None and not Path(args.output).is_dir(): arg_parser.error("invalid output")
 
     # 出力ディレクトリの準備とか
-    output_dirpath = (str(Path(args.input).parent / "output") if args.output is None else args.output)
+    output_dirpath = (str(Path(args.input).parent) if args.output is None else args.output)
     glob_filepath = (str(Path(args.input) / "*.md") if Path(args.input).is_dir() else args.input)
     md_filepaths = [filepath for filepath in glob.glob(glob_filepath)]
     Path(output_dirpath).mkdir(parents=True, exist_ok=True)
@@ -67,7 +67,7 @@ def main() -> None:
     if not args.force and Path(css_output_filepath).exists():
         executable_filename = Path(__file__).name
         should_overwrite = input(f"{executable_filename}: overwrite '{css_output_filepath}'? ")
-        if should_overwrite is None or should_overwrite[0].lower() != "y": return
+        if len(should_overwrite) == 0 or should_overwrite[0].lower() != "y": return
     shutil.copy(str(Path(__file__).parent / "templates" / "github-markdown.css"), css_output_filepath)
     if args.verbose: print(f"saved css '{css_output_filepath}'")
 
