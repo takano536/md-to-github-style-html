@@ -8,9 +8,9 @@ import sys
 GITHUB_MD_API_URL = "https://api.github.com/markdown"
 
 
-def md2html(input_filepath: str, output_dirpath: str, verbose: bool = False, force: bool = False) -> None:
+def md2html(input_filepath: str, output_dirpath: str, output_filename: str = None, verbose: bool = False, force: bool = False) -> None:
     # 出力htmlのパスを設定
-    output_filename = str(Path(Path(input_filepath).stem).with_suffix(".html"))
+    if output_filename is None: output_filename = str(Path(Path(input_filepath).stem).with_suffix(".html"))
     output_filepath = str(Path(output_dirpath) / output_filename)
 
     # 既にファイルが存在してforceがFalseなら聞く
@@ -22,7 +22,8 @@ def md2html(input_filepath: str, output_dirpath: str, verbose: bool = False, for
     # apiをたたく
     with open(input_filepath, "r", encoding="utf-8") as f:
         payload = {"text": f.read(), "mode": "markdown"}
-        output_content = requests.post(GITHUB_MD_API_URL, json=payload).text
+    output_content = requests.post(GITHUB_MD_API_URL, json=payload).text
+    output_content = output_content.replace("user-content-", "")
 
     # テンプレートファイルに書き込む
     template_filepath = str(Path(__file__).parent / "templates" / "template.html")
@@ -51,15 +52,20 @@ def main() -> None:
     arg_parser.add_argument('-f', '--force', action='store_true')
     args = arg_parser.parse_args()
     if not Path(args.input).exists(): arg_parser.error("invalid input")
+    if Path(args.input).is_dir() and len(Path(args.output).suffix) > 0: arg_parser.error("invalid input or output")
 
     # 出力ディレクトリの準備とか
-    output_dirpath = (str(Path(args.input).parent) if args.output is None else args.output)
+    output_filename = (Path(args.output).name if args.output is not None and len(Path(args.output).suffix) > 0 else None)
+    if args.output is None:
+        output_dirpath = (str(Path(args.input).parent) if len(Path(args.input).suffix) > 0 else str(Path(args.input).parent / "output"))
+    else:
+        output_dirpath = (Path(args.output).parent if len(Path(args.output).suffix) > 0 else args.output)
     glob_filepath = (str(Path(args.input) / "*.md") if Path(args.input).is_dir() else args.input)
     md_filepaths = [filepath for filepath in glob.glob(glob_filepath)]
     Path(output_dirpath).mkdir(parents=True, exist_ok=True)
 
     # 各ファイルに対して変換
-    [md2html(filepath, output_dirpath, args.verbose, args.force) for filepath in md_filepaths]
+    [md2html(filepath, output_dirpath, output_filename, args.verbose, args.force) for filepath in md_filepaths]
 
     # cssを出力
     css_output_filepath = str(Path(output_dirpath) / "style.css")
