@@ -51,7 +51,6 @@ def main() -> None:
     arg_parser.add_argument('-f', '--force', action='store_true')
     args = arg_parser.parse_args()
     if not Path(args.input).exists(): arg_parser.error("invalid input")
-    if args.output is not None and not Path(args.output).is_dir(): arg_parser.error("invalid output")
 
     # 出力ディレクトリの準備とか
     output_dirpath = (str(Path(args.input).parent) if args.output is None else args.output)
