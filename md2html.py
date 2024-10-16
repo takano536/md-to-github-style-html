@@ -1,42 +1,53 @@
 import argparse
-import glob
-from pathlib import Path
-import requests
-import shutil
 import sys
+from pathlib import Path
 
-GITHUB_MD_API_URL = "https://api.github.com/markdown"
+import requests
+
+GITHUB_MD_API_URL = 'https://api.github.com/markdown'
+CSS_URL = 'https://raw.githubusercontent.com/sindresorhus/github-markdown-css/refs/heads/main/github-markdown.css'
+CSS_LICENSE_URL = 'https://raw.githubusercontent.com/sindresorhus/github-markdown-css/refs/heads/main/license'
+
+TEMPLATE_DIRPATH = str(Path(__file__).parent / 'templates')
+TEMPLATE_FILEPATH = str(Path(TEMPLATE_DIRPATH) / 'template.html')
+MINIMUM_CSS_FILEPATH = str(Path(TEMPLATE_DIRPATH) / 'minimum.css')
 
 
-def md2html(input_filepath: str, output_dirpath: str, output_filename: str = None, verbose: bool = False, force: bool = False) -> None:
+def md2html(input_filepath: str, output_dirpath: str, force: bool = False) -> tuple[str, str]:
+
     # 出力htmlのパスを設定
-    if output_filename is None: output_filename = str(Path(Path(input_filepath).stem).with_suffix(".html"))
-    output_filepath = str(Path(output_dirpath) / output_filename)
+    output_filepath = str(Path(output_dirpath) / str(Path(input_filepath).with_suffix('.html')))
 
     # 既にファイルが存在してforceがFalseなら聞く
     if not force and Path(output_filepath).exists():
         executable_filename = Path(__file__).name
-        should_overwrite = input(f"{executable_filename}: overwrite '{output_filepath}'? ")
-        if len(should_overwrite) == 0 or should_overwrite[0].lower() != "y": return
+        should_overwrite = input(f'{executable_filename}: overwrite "{output_filepath}" ? [y/n] ')
+        if len(should_overwrite) == 0 or should_overwrite[0].lower() != 'y':
+            return ('', output_filepath)
 
     # apiをたたく
-    with open(input_filepath, "r", encoding="utf-8") as f:
-        payload = {"text": f.read(), "mode": "markdown"}
-    output_content = requests.post(GITHUB_MD_API_URL, json=payload).text
-    output_content = output_content.replace("user-content-", "")
+    with open(input_filepath, 'r', encoding='utf-8') as f:
+        payload = {'text': f.read(), 'mode': 'markdown'}
+    try:
+        response = requests.post(GITHUB_MD_API_URL, json=payload)
+        response.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        print(f'error: {e}')
+        return ('', output_filepath)
+    output_content = response.text
+    output_content = output_content.replace('user-content-', '')
 
     # テンプレートファイルに書き込む
-    template_filepath = str(Path(__file__).parent / "templates" / "template.html")
-    with open(template_filepath, "r", encoding="utf-8") as f:
+    with open(TEMPLATE_FILEPATH, 'r', encoding='utf-8') as f:
         template_content = f.read()
-    template_content = template_content.replace("__title__", str(Path(input_filepath).name))
-    template_content = template_content.replace("__content__", output_content)
-    with open(output_filepath, "w") as f:
-        f.write(template_content)
-    if verbose: print(f"saved html '{output_filepath}'")
+    template_content = template_content.replace('__title__', str(Path(input_filepath).stem))
+    template_content = template_content.replace('__content__', output_content)
+
+    return (template_content, output_filepath)
 
 
 def main() -> None:
+
     # エラーメッセージが出力できるargparserクラス
     class ParserHelpOnError(argparse.ArgumentParser):
         def error(self, message):
@@ -46,36 +57,68 @@ def main() -> None:
 
     # 引数の解析
     arg_parser = ParserHelpOnError()
-    arg_parser.add_argument('input')
-    arg_parser.add_argument('-o', '--output')
+    arg_parser.add_argument('input', help='input markdown file not directory. output will be saved in the same directory.')
+    arg_parser.add_argument('-f', '--force', action='store_true', help='overwrite without asking')
+    arg_parser.add_argument('-e', '--embed', action='store_true', help='embed css in html')
     arg_parser.add_argument('-v', '--verbose', action='store_true')
-    arg_parser.add_argument('-f', '--force', action='store_true')
     args = arg_parser.parse_args()
-    if not Path(args.input).exists(): arg_parser.error("invalid input")
-    if Path(args.input).is_dir() and len(Path(args.output).suffix) > 0: arg_parser.error("invalid input or output")
+    if not Path(args.input).exists():
+        arg_parser.error('input file not found')
+    if Path(args.input).is_dir():
+        arg_parser.error('input must be a file not directory')
 
-    # 出力ディレクトリの準備とか
-    output_filename = (Path(args.output).name if args.output is not None and len(Path(args.output).suffix) > 0 else None)
-    if args.output is None:
-        output_dirpath = (str(Path(args.input).parent) if len(Path(args.input).suffix) > 0 else str(Path(args.input).parent / "output"))
-    else:
-        output_dirpath = (Path(args.output).parent if len(Path(args.output).suffix) > 0 else args.output)
-    glob_filepath = (str(Path(args.input) / "*.md") if Path(args.input).is_dir() else args.input)
-    md_filepaths = [filepath for filepath in glob.glob(glob_filepath)]
-    Path(output_dirpath).mkdir(parents=True, exist_ok=True)
+    # 出力ディレクトリの設定
+    output_dirpath = str(Path(args.input).parent)
+
+    # cssをリポジトリから取得
+    try:
+        response = requests.get(CSS_URL)
+        response.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        print(f'error: {e}')
+        return
+    github_css = response.text
+    try:
+        response = requests.get(CSS_LICENSE_URL)
+        response.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        print(f'error: {e}')
+        return
+    github_css = '/*\n' + response.text + '\n*/\n\n' + github_css  # ライセンス文を追加
+
+    # cssを埋め込まない用の最小cssを取得
+    with open(MINIMUM_CSS_FILEPATH, 'r', encoding='utf-8') as f:
+        minimum_css = f.read()
+    embed_css = '\n'.join([github_css, minimum_css])
 
     # 各ファイルに対して変換
-    [md2html(filepath, output_dirpath, output_filename, args.verbose, args.force) for filepath in md_filepaths]
+    html, output_filepath = md2html(args.input, output_dirpath, args.force)
 
-    # cssを出力
-    css_output_filepath = str(Path(output_dirpath) / "style.css")
+    # 出力を保存
+    html = html.replace('/* __css__ */', embed_css if args.embed else minimum_css)
+    with open(output_filepath, 'w', encoding='utf-8') as f:
+        f.write(html)
+    if args.verbose:
+        print(f'saved html "{output_filepath}"')
+
+    # cssを出力するか確認
+    if args.embed:
+        return
+
+    # cssの出力先を設定
+    css_output_filepath = str(Path(output_dirpath) / 'style.css')
     if not args.force and Path(css_output_filepath).exists():
         executable_filename = Path(__file__).name
-        should_overwrite = input(f"{executable_filename}: overwrite '{css_output_filepath}'? ")
-        if len(should_overwrite) == 0 or should_overwrite[0].lower() != "y": return
-    shutil.copy(str(Path(__file__).parent / "templates" / "github-markdown.css"), css_output_filepath)
-    if args.verbose: print(f"saved css '{css_output_filepath}'")
+        should_overwrite = input(f'{executable_filename}: overwrite "{css_output_filepath}" ? [y/n] ')
+        if len(should_overwrite) == 0 or should_overwrite[0].lower() != 'y':
+            return
+
+    # cssを保存
+    with open(css_output_filepath, 'w', encoding='utf-8') as f:
+        f.write(github_css)
+    if args.verbose:
+        print(f'saved css "{css_output_filepath}"')
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
